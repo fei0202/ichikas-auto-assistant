@@ -1,11 +1,11 @@
 # ruff: noqa: E402
+import sys
 from .controllers.log_bridge import LogBridge
 log_bridge = LogBridge(None)
 log_bridge.install()
 
 import ctypes
 import os
-import sys
 import platform
 from ctypes import wintypes
 from pathlib import Path

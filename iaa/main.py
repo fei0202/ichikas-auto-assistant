@@ -233,11 +233,12 @@ def execute_cli_action(action: CliAction) -> int:
     raise RuntimeError(f'Unsupported CLI action: {action.kind}')
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    action = parse_cli_action(argv)
+def main() -> int:
+    print('Arguments:', sys.argv)
+    action = parse_cli_action(sys.argv[1:])
     setup_telemetry()
     return execute_cli_action(action)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    raise SystemExit(main())

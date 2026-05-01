@@ -27,10 +27,6 @@ class IaaService:
     def __configure_logging(self) -> None:
         """配置日志：控制台 DEBUG + 文件 logs/YYYY-MM-DD-hh-mm-ss.log。只配置一次。"""
         root_logger = logging.getLogger()
-        
-        # 如果已经配置过了就跳过（避免重复配置）
-        if root_logger.handlers:
-            return
             
         root_logger.setLevel(logging.INFO)
         logging.getLogger("kotonebot").setLevel(logging.DEBUG)
