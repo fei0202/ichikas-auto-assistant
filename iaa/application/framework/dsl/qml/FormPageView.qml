@@ -9,7 +9,7 @@ import "."
 
 ScrollView {
     id: root
-    property var runtime: ({"groups": []})
+    property var runtime: ({"groups": [], "fieldMap": {}})
     property var formController
 
     anchors.fill: parent
@@ -34,10 +34,10 @@ ScrollView {
                     spacing: 10
 
                     Repeater {
-                        model: groupDelegate.modelData.fields || []
+                        model: groupDelegate.modelData.fieldIds || []
                         delegate: Item {
                             id: fieldDelegate
-                            required property var modelData
+                            required property string modelData
 
                             Layout.fillWidth: true
                             implicitWidth: renderer.implicitWidth
@@ -47,7 +47,8 @@ ScrollView {
                                 id: renderer
                                 anchors.left: parent.left
                                 anchors.right: parent.right
-                                field: fieldDelegate.modelData
+                                fieldId: fieldDelegate.modelData
+                                initialField: root.runtime.fieldMap[fieldDelegate.modelData] || {}
                                 formController: root.formController
                             }
                         }

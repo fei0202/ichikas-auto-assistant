@@ -11,15 +11,18 @@ class RuntimeEngine:
 
     def build_runtime(self, state: Any) -> dict[str, Any]:
         groups: list[dict[str, Any]] = []
+        field_map: dict[str, Any] = {}
+
         for group in self.spec.groups:
-            runtime_fields: list[dict[str, Any]] = []
+            field_ids: list[str] = []
             for field in group.fields:
                 runtime = self._build_field_runtime(field, state)
                 if runtime['visible']:
-                    runtime_fields.append(runtime)
-            groups.append({'title': group.title, 'fields': runtime_fields})
+                    field_ids.append(field.key)
+                    field_map[field.key] = runtime
+            groups.append({'title': group.title, 'fieldIds': field_ids})
 
-        return {'title': self.spec.title, 'groups': groups}
+        return {'title': self.spec.title, 'groups': groups, 'fieldMap': field_map}
 
     def find_field(self, field_id: str) -> FieldSpec | None:
         for group in self.spec.groups:

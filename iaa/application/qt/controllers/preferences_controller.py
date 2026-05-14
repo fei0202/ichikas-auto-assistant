@@ -30,6 +30,7 @@ class PreferencesController(QObject):
     operationFailed = Signal(str)
     runtimeChanged = Signal()
     dirtyChanged = Signal(bool)
+    fieldUpdated = Signal(str, str)  # (field_id, field_json)
 
     def __init__(self, iaa_service: 'IaaService', parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -74,6 +75,22 @@ class PreferencesController(QObject):
         runtime['dirty'] = self._state.dirty
         self._runtime = runtime
 
+    def _emit_updates(self, old_runtime: dict[str, Any]) -> None:
+        """比较新旧 runtime，有结构变化时发 runtimeChanged，否则只发变化字段的 fieldUpdated。"""
+        new_field_map: dict[str, Any] = self._runtime.get('fieldMap', {})
+        old_field_map: dict[str, Any] = old_runtime.get('fieldMap', {})
+
+        if old_field_map.keys() != new_field_map.keys():
+            self.runtimeChanged.emit()
+            self.dirtyChanged.emit(self._state.dirty)
+            return
+
+        for field_id, new_field in new_field_map.items():
+            if old_field_map.get(field_id) != new_field:
+                self.fieldUpdated.emit(field_id, json.dumps(new_field, ensure_ascii=False))
+
+        self.dirtyChanged.emit(self._state.dirty)
+
     @Slot(result=str)
     def getRuntime(self) -> str:
         return json.dumps(self._runtime, ensure_ascii=False)
@@ -97,9 +114,9 @@ class PreferencesController(QObject):
                 hook(self._state.context)
 
             self._sync_context_back()
+            old_runtime = self._runtime
             self._recompute_runtime()
-            self.runtimeChanged.emit()
-            self.dirtyChanged.emit(self._state.dirty)
+            self._emit_updates(old_runtime)
         except Exception as exc:
             self.operationFailed.emit(f'设置字段失败：{exc}')
 

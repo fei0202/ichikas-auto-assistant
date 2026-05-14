@@ -14,17 +14,25 @@ ColumnLayout {
 
     spacing: 4
 
+    // 当 field 从外部更新（如 discard、switchProfile）时，若输入框未聚焦则同步文本。
+    onFieldChanged: {
+        if (!tf.activeFocus) {
+            tf.text = String(root.field.value ?? "")
+        }
+    }
+
     FormField {
         Layout.fillWidth: true
         labelText: root.field.label
         helpText: root.field.helpText || ""
         errorText: root.field.error || ""
         TextField {
+            id: tf
             Layout.fillWidth: true
-            text: String(root.field.value || "")
             enabled: !!root.field.enabled
             placeholderText: root.field.props && root.field.props.placeholder ? root.field.props.placeholder : ""
-            onTextEdited: root.formController.setValue(root.field.id, text)
+            Component.onCompleted: tf.text = String(root.field.value ?? "")
+            onEditingFinished: root.formController.setValue(root.field.id, tf.text)
         }
     }
 

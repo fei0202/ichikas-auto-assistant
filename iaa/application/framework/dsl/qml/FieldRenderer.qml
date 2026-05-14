@@ -9,8 +9,24 @@ import "./controls"
 Item {
     id: root
 
-    required property var field
+    required property string fieldId
+    required property var initialField
     required property var formController
+
+    // 工作副本：初始化时从 initialField 同步，后续由 fieldUpdated 信号更新。
+    // 不使用绑定，避免因 runtimeChanged 全量刷新时被重置而打断用户输入。
+    property var field: root.initialField
+
+    onInitialFieldChanged: root.field = root.initialField
+
+    Connections {
+        target: root.formController
+        function onFieldUpdated(id, fieldJson) {
+            if (id === root.fieldId) {
+                root.field = JSON.parse(fieldJson)
+            }
+        }
+    }
 
     implicitWidth: loader.implicitWidth
     implicitHeight: loader.implicitHeight
