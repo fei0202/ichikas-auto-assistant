@@ -34,20 +34,20 @@ class ProfileV1ToV2(MigrationStep):
                 content = file.read_text(encoding='utf-8')
                 data = json.loads(content)
                 version = data.get('version', 1)
-                
+
                 if version >= 2:
                     continue
-                
+
                 changed = False
                 game = data.get('game', {})
                 emulator = game.get('emulator')
                 emulator_data = game.get('emulator_data', {})
-                
+
                 if emulator == 'physical_android':
                     if 'adb_serial' in emulator_data:
                         emulator_data['device_serial'] = emulator_data.pop('adb_serial')
                         changed = True
-                
+
                 elif emulator == 'custom':
                     # 迁移 emulator_path -> start_command
                     emulator_data = emulator_data or {}
@@ -68,11 +68,125 @@ class ProfileV1ToV2(MigrationStep):
                 # 升级版本号
                 data['version'] = 2
                 file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
- 
+
                 ctx.messages.append(MigrationMessage(
                     text="自定义模拟器配置升级",
                     old_version="26.04b5 (v1)",
                     new_version="26.05b1 (v2)"
+                ))
+            except Exception as e:
+                ctx.messages.append(MigrationMessage(
+                    text=f"迁移配置 {file.name} 时出错: {e}",
+                    level='warning'
+                ))
+                logger.exception(f"Error migrating config {file.name}")
+
+
+class ProfileV2ToV3(MigrationStep):
+    """
+    将设备/连接/控制配置从 game.* 迁移到新的顶层 device.* 结构。
+
+    旧结构（game.*）：
+        emulator, check_emulator, emulator_data,
+        control_impl, scrcpy_virtual_display, resolution_method
+
+    新结构（device.*）：
+        lifecycle: {type, ...}
+        connection: {type, ...}
+        control_impl, scrcpy_virtual_display, resolution_method
+    """
+
+    def check_needed(self, ctx: MigrationContext) -> bool:
+        for file in ctx.config_dir.glob('*.json'):
+            if file.stem == '_shared':
+                continue
+            try:
+                data = json.loads(file.read_text(encoding='utf-8'))
+                if data.get('version', 1) < 3:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def apply(self, ctx: MigrationContext) -> None:
+        for file in ctx.config_dir.glob('*.json'):
+            if file.stem == '_shared':
+                continue
+            try:
+                data = json.loads(file.read_text(encoding='utf-8'))
+                if data.get('version', 1) >= 3:
+                    continue
+
+                game = data.get('game', {})
+                emulator = game.pop('emulator', 'mumu_v5')
+                check_emulator = game.pop('check_emulator', False)
+                emulator_data = game.pop('emulator_data', None) or {}
+                control_impl = game.pop('control_impl', 'nemu_ipc')
+                scrcpy_virtual_display = game.pop('scrcpy_virtual_display', False)
+                resolution_method = game.pop('resolution_method', 'auto')
+
+                # ── 生命周期 ──────────────────────────────────
+                if emulator in ('mumu', 'mumu_v5'):
+                    lifecycle = {
+                        'type': emulator,
+                        'instance_id': emulator_data.get('instance_id'),
+                        'check_and_start': bool(check_emulator),
+                    }
+                    connection = {'type': 'auto'}
+
+                elif emulator == 'custom':
+                    lifecycle = {
+                        'type': 'custom',
+                        'check_and_start': bool(check_emulator),
+                        'start_command': emulator_data.get('start_command', ''),
+                        'wait_start_command': bool(emulator_data.get('wait_start_command', False)),
+                        'stop_command': emulator_data.get('stop_command', ''),
+                        'running_command': emulator_data.get('running_command', ''),
+                    }
+                    # 连接方式：有 adb_port 且 run_adb_connect → TCP；否则 USB
+                    run_adb_connect = bool(emulator_data.get('run_adb_connect', True))
+                    adb_port = emulator_data.get('adb_port')
+                    if run_adb_connect and adb_port is not None:
+                        connection = {
+                            'type': 'tcp',
+                            'ip': emulator_data.get('adb_ip') or '127.0.0.1',
+                            'port': adb_port,
+                            'run_adb_connect': True,
+                            'device_serial': emulator_data.get('device_serial', ''),
+                        }
+                    else:
+                        connection = {
+                            'type': 'usb',
+                            'device_serial': emulator_data.get('device_serial', ''),
+                        }
+
+                elif emulator == 'physical_android':
+                    lifecycle = {'type': 'none'}
+                    connection = {
+                        'type': 'usb',
+                        'device_serial': emulator_data.get('device_serial', ''),
+                    }
+
+                else:
+                    # 未知类型，保守处理
+                    lifecycle = {'type': 'none'}
+                    connection = {'type': 'usb', 'device_serial': ''}
+
+                data['device'] = {
+                    'lifecycle': lifecycle,
+                    'connection': connection,
+                    'control_impl': control_impl,
+                    'scrcpy_virtual_display': scrcpy_virtual_display,
+                    'resolution_method': resolution_method,
+                }
+                data['game'] = game
+                data['version'] = 3
+
+                file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+                ctx.messages.append(MigrationMessage(
+                    text="设备配置结构升级（device.*）",
+                    old_version="26.05 (v2)",
+                    new_version="26.05 (v3)"
                 ))
             except Exception as e:
                 ctx.messages.append(MigrationMessage(

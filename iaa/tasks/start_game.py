@@ -69,7 +69,7 @@ def start_game():
     if d.current_package() != package_name:
         use_scrcpy_with_virtual_display = (
             type(d.screenshotable).__name__ == 'ScrcpyImpl'
-            and conf().game.scrcpy_virtual_display
+            and conf().device.scrcpy_virtual_display
         )
         if not use_scrcpy_with_virtual_display:
             logger.info('Not at game. Launching...')

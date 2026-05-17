@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Callable, Literal
 import platform
 
 from iaa.application.framework.dsl import (
@@ -19,9 +20,12 @@ from iaa.application.framework.dsl import (
 )
 from ..models import SONG_KEEP_UNCHANGED, normalize_song_name_input
 from iaa.config.schemas import (
-    CustomEmulatorData,
-    MuMuEmulatorData,
-    PhysicalAndroidData,
+    MuMuDevice,
+    CustomDevice,
+    NoDevice,
+    AutoConnection,
+    UsbConnection,
+    TcpConnection,
 )
 from iaa.definitions.enums import (
     ChallengeLiveAward,
@@ -32,11 +36,41 @@ from iaa.definitions.enums import (
 CTX = of(FormContext)
 
 
-def _emulator_is(*values: str):
-    return lambda s: s.conf.game.emulator in values
+# ── 辅助判断 ──────────────────────────────────────────────────────────────────
+
+def _lifecycle_is(*types) -> Callable[[FormContext], bool]:
+    return lambda s: isinstance(s.conf.device.lifecycle, types)
+
+def _connection_is(*types) -> Callable[[FormContext], bool]:
+    return lambda s: isinstance(s.conf.device.connection, types)
+
+def _is_mumu(s: FormContext) -> bool:
+    return isinstance(s.conf.device.lifecycle, MuMuDevice)
+
+def _is_custom(s: FormContext) -> bool:
+    return isinstance(s.conf.device.lifecycle, CustomDevice)
+
+def _is_no_device(s: FormContext) -> bool:
+    return isinstance(s.conf.device.lifecycle, NoDevice)
+
+def _is_tcp(s: FormContext) -> bool:
+    return isinstance(s.conf.device.connection, TcpConnection)
+
+def _show_connection_section(s: FormContext) -> bool:
+    return not _is_mumu(s)
+
+def _show_tcp_fields(s: FormContext) -> bool:
+    return _show_connection_section(s) and _is_tcp(s)
+
+def _show_usb_serial(s: FormContext) -> bool:
+    return _show_connection_section(s) and isinstance(s.conf.device.connection, UsbConnection)
 
 
-def _validate_port(value: object, _state: FormContext) -> str | None:
+# ── 验证器 ────────────────────────────────────────────────────────────────────
+
+def _validate_tcp_port(value: object, state: FormContext) -> str | None:
+    if not _show_tcp_fields(state):
+        return None
     port = str(value or '').strip()
     if not port:
         return '端口不能为空'
@@ -44,6 +78,12 @@ def _validate_port(value: object, _state: FormContext) -> str | None:
         return '端口必须是数字'
     return None
 
+def _validate_start_command(value: object, state: FormContext) -> str | None:
+    if not _is_custom(state):
+        return None
+    if not str(value or '').strip():
+        return '启动命令不能为空'
+    return None
 
 def _validate_watch_ad_wait_sec(value: object, _state: FormContext) -> str | None:
     text = str(value or '').strip()
@@ -56,178 +96,192 @@ def _validate_watch_ad_wait_sec(value: object, _state: FormContext) -> str | Non
     return None
 
 
-def _validate_start_command(value: object, _state: FormContext) -> str | None:
-    if not str(value or '').strip():
-        return '启动命令不能为空'
-    return None
+# ── lifecycle type ────────────────────────────────────────────────────────────
+
+def _get_lifecycle_type(state: FormContext) -> str:
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, MuMuDevice):
+        return lc.type
+    if isinstance(lc, CustomDevice):
+        return 'custom'
+    return 'none'
+
+def _set_lifecycle_type(state: FormContext, value: object) -> None:
+    val = str(value or '')
+    current = state.conf.device.lifecycle
+    if val in ('mumu', 'mumu_v5'):
+        if isinstance(current, MuMuDevice) and current.type == val:
+            return
+        t: Literal['mumu', 'mumu_v5'] = 'mumu' if val == 'mumu' else 'mumu_v5'
+        state.conf.device.lifecycle = MuMuDevice(type=t)
+        state.conf.device.connection = AutoConnection(type='auto')
+        # 切到 MuMu 时，若 control_impl 不支持则重置
+        if state.conf.device.control_impl == 'nemu_ipc':
+            pass  # nemu_ipc 是 MuMu 的推荐
+    elif val == 'custom':
+        if isinstance(current, CustomDevice):
+            return
+        state.conf.device.lifecycle = CustomDevice(type='custom')
+        if isinstance(state.conf.device.connection, AutoConnection):
+            state.conf.device.connection = TcpConnection(type='tcp')
+        if state.conf.device.control_impl == 'nemu_ipc':
+            state.conf.device.control_impl = 'adb'
+    elif val == 'none':
+        if isinstance(current, NoDevice):
+            return
+        state.conf.device.lifecycle = NoDevice(type='none')
+        if isinstance(state.conf.device.connection, AutoConnection):
+            state.conf.device.connection = UsbConnection(type='usb')
+        if state.conf.device.control_impl == 'nemu_ipc':
+            state.conf.device.control_impl = 'adb'
 
 
-def _on_emulator_change(state: FormContext, value: object) -> None:
-    if value not in {'mumu', 'mumu_v5'} and state.conf.game.control_impl == 'nemu_ipc':
-        state.conf.game.control_impl = 'adb'
-
-
-def _on_server_change(state: FormContext, value: object) -> None:
-    if value != 'jp':
-        state.conf.game.link_account = 'no'
-
+# ── MuMu instance id ──────────────────────────────────────────────────────────
 
 def _get_mumu_instance_id(state: FormContext) -> str:
-    if state.conf.game.emulator in {'mumu', 'mumu_v5'} and isinstance(state.conf.game.emulator_data, MuMuEmulatorData):
-        return state.conf.game.emulator_data.instance_id or ''
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, MuMuDevice):
+        return lc.instance_id or ''
     return ''
-
 
 def _set_mumu_instance_id(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator not in {'mumu', 'mumu_v5'}:
-        return
-    if not isinstance(state.conf.game.emulator_data, MuMuEmulatorData):
-        state.conf.game.emulator_data = MuMuEmulatorData()
-    state.conf.game.emulator_data.instance_id = (str(value or '').strip() or None)
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, MuMuDevice):
+        lc.instance_id = str(value or '').strip() or None
 
 
-def _get_physical_android_serial(state: FormContext) -> str:
-    if state.conf.game.emulator == 'physical_android' and isinstance(state.conf.game.emulator_data, PhysicalAndroidData):
-        return (state.conf.game.emulator_data.device_serial or '').strip()
+# ── MuMu check_and_start ──────────────────────────────────────────────────────
+
+def _get_check_and_start(state: FormContext) -> bool:
+    lc = state.conf.device.lifecycle
+    return lc.check_and_start if isinstance(lc, (MuMuDevice, CustomDevice)) else False
+
+def _set_check_and_start(state: FormContext, value: object) -> None:
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, (MuMuDevice, CustomDevice)):
+        lc.check_and_start = bool(value)
+
+
+# ── CustomDevice lifecycle fields ─────────────────────────────────────────────
+
+def _get_custom_start_command(state: FormContext) -> str:
+    lc = state.conf.device.lifecycle
+    return lc.start_command if isinstance(lc, CustomDevice) else ''
+
+def _set_custom_start_command(state: FormContext, value: object) -> None:
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, CustomDevice):
+        lc.start_command = str(value or '').strip()
+
+def _get_custom_wait_start_command(state: FormContext) -> bool:
+    lc = state.conf.device.lifecycle
+    return bool(lc.wait_start_command) if isinstance(lc, CustomDevice) else False
+
+def _set_custom_wait_start_command(state: FormContext, value: object) -> None:
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, CustomDevice):
+        lc.wait_start_command = bool(value)
+
+def _get_custom_stop_command(state: FormContext) -> str:
+    lc = state.conf.device.lifecycle
+    return lc.stop_command if isinstance(lc, CustomDevice) else ''
+
+def _set_custom_stop_command(state: FormContext, value: object) -> None:
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, CustomDevice):
+        lc.stop_command = str(value or '').strip()
+
+def _get_custom_running_command(state: FormContext) -> str:
+    lc = state.conf.device.lifecycle
+    return lc.running_command if isinstance(lc, CustomDevice) else ''
+
+def _set_custom_running_command(state: FormContext, value: object) -> None:
+    lc = state.conf.device.lifecycle
+    if isinstance(lc, CustomDevice):
+        lc.running_command = str(value or '').strip()
+
+
+# ── connection type ───────────────────────────────────────────────────────────
+
+def _get_connection_type(state: FormContext) -> str:
+    conn = state.conf.device.connection
+    if isinstance(conn, UsbConnection):
+        return 'usb'
+    if isinstance(conn, TcpConnection):
+        return 'tcp'
+    return 'usb'  # auto 不对用户展示，fallback 到 usb
+
+def _set_connection_type(state: FormContext, value: object) -> None:
+    val = str(value or '')
+    if val == 'usb':
+        state.conf.device.connection = UsbConnection(type='usb')
+    elif val == 'tcp':
+        state.conf.device.connection = TcpConnection(type='tcp')
+
+
+# ── USB fields ────────────────────────────────────────────────────────────────
+
+def _get_usb_serial(state: FormContext) -> str:
+    conn = state.conf.device.connection
+    return conn.device_serial if isinstance(conn, UsbConnection) else ''
+
+def _set_usb_serial(state: FormContext, value: object) -> None:
+    conn = state.conf.device.connection
+    if isinstance(conn, UsbConnection):
+        conn.device_serial = str(value or '').strip()
+
+
+# ── TCP fields ────────────────────────────────────────────────────────────────
+
+def _get_tcp_ip(state: FormContext) -> str:
+    conn = state.conf.device.connection
+    return conn.ip if isinstance(conn, TcpConnection) else '127.0.0.1'
+
+def _set_tcp_ip(state: FormContext, value: object) -> None:
+    conn = state.conf.device.connection
+    if isinstance(conn, TcpConnection):
+        conn.ip = str(value or '').strip() or '127.0.0.1'
+
+def _get_tcp_port(state: FormContext) -> str:
+    conn = state.conf.device.connection
+    if isinstance(conn, TcpConnection):
+        return '' if conn.port is None else str(conn.port)
     return ''
 
-
-def _set_physical_android_serial(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'physical_android':
-        return
-    if not isinstance(state.conf.game.emulator_data, PhysicalAndroidData):
-        state.conf.game.emulator_data = PhysicalAndroidData()
-    state.conf.game.emulator_data.device_serial = str(value or '').strip()
-
-
-def _ensure_custom_data(state: FormContext) -> CustomEmulatorData:
-    if not isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        state.conf.game.emulator_data = CustomEmulatorData()
-    return state.conf.game.emulator_data
-
-
-def _custom_adb_connect_enabled(state: FormContext) -> bool:
-    if state.conf.game.emulator != 'custom':
-        return False
-    data = _ensure_custom_data(state)
-    return bool(data.run_adb_connect)
-
-
-def _get_custom_adb_ip(state: FormContext) -> str:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return state.conf.game.emulator_data.adb_ip
-    return '127.0.0.1'
-
-
-def _set_custom_adb_ip(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.adb_ip = str(value or '').strip() or '127.0.0.1'
-
-
-def _get_custom_adb_port(state: FormContext) -> str:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        value = state.conf.game.emulator_data.adb_port
-        return '' if value is None else str(value)
-    return ''
-
-
-def _set_custom_adb_port(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
+def _set_tcp_port(state: FormContext, value: object) -> None:
+    conn = state.conf.device.connection
+    if not isinstance(conn, TcpConnection):
         return
     text = str(value or '').strip()
     if not text:
-        data = _ensure_custom_data(state)
-        data.adb_port = None
+        conn.port = None
         return
-    if not text.isdigit():
-        return
-    data = _ensure_custom_data(state)
-    data.adb_port = int(text)
+    if text.isdigit():
+        conn.port = int(text)
+
+def _get_tcp_run_adb_connect(state: FormContext) -> bool:
+    conn = state.conf.device.connection
+    return bool(conn.run_adb_connect) if isinstance(conn, TcpConnection) else True
+
+def _set_tcp_run_adb_connect(state: FormContext, value: object) -> None:
+    conn = state.conf.device.connection
+    if isinstance(conn, TcpConnection):
+        conn.run_adb_connect = bool(value)
+
+def _get_tcp_device_serial(state: FormContext) -> str:
+    conn = state.conf.device.connection
+    return conn.device_serial if isinstance(conn, TcpConnection) else ''
+
+def _set_tcp_device_serial(state: FormContext, value: object) -> None:
+    conn = state.conf.device.connection
+    if isinstance(conn, TcpConnection):
+        conn.device_serial = str(value or '').strip()
 
 
-def _get_custom_device_serial(state: FormContext) -> str:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return state.conf.game.emulator_data.device_serial
-    return ''
-
-
-def _set_custom_device_serial(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.device_serial = str(value or '').strip()
-
-
-def _get_custom_run_adb_connect(state: FormContext) -> bool:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return bool(state.conf.game.emulator_data.run_adb_connect)
-    return True
-
-
-def _set_custom_run_adb_connect(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.run_adb_connect = bool(value)
-
-
-def _get_custom_wait_start_command(state: FormContext) -> bool:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return bool(state.conf.game.emulator_data.wait_start_command)
-    return True
-
-
-def _set_custom_wait_start_command(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.wait_start_command = bool(value)
-
-
-def _get_custom_start_command(state: FormContext) -> str:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return state.conf.game.emulator_data.start_command
-    return ''
-
-
-def _set_custom_start_command(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.start_command = str(value or '').strip()
-
-
-def _get_custom_stop_command(state: FormContext) -> str:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return state.conf.game.emulator_data.stop_command
-    return ''
-
-
-def _set_custom_stop_command(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.stop_command = str(value or '').strip()
-
-
-def _get_custom_running_command(state: FormContext) -> str:
-    if state.conf.game.emulator == 'custom' and isinstance(state.conf.game.emulator_data, CustomEmulatorData):
-        return state.conf.game.emulator_data.running_command
-    return ''
-
-
-def _set_custom_running_command(state: FormContext, value: object) -> None:
-    if state.conf.game.emulator != 'custom':
-        return
-    data = _ensure_custom_data(state)
-    data.running_command = str(value or '').strip()
-
+# ── CM ────────────────────────────────────────────────────────────────────────
 
 def _get_watch_ad_wait_sec(state: FormContext) -> str:
     return str(int(state.conf.cm.watch_ad_wait_sec))
-
 
 def _set_watch_ad_wait_sec(state: FormContext, value: object) -> None:
     text = str(value or '').strip()
@@ -238,6 +292,12 @@ def _set_watch_ad_wait_sec(state: FormContext, value: object) -> None:
         return
     state.conf.cm.watch_ad_wait_sec = num
 
+def _on_server_change(state: FormContext, value: object) -> None:
+    if value != 'jp':
+        state.conf.game.link_account = 'no'
+
+
+# ── Form ──────────────────────────────────────────────────────────────────────
 
 def build_settings_form() -> tuple[FormSpec, list]:
     with FormPage('配置') as page:
@@ -266,118 +326,131 @@ def build_settings_form() -> tuple[FormSpec, list]:
                 ref=ref(CTX.conf.game.link_account),
                 visible=lambda s: s.conf.game.server == 'jp',
                 options=lambda s: s.meta.linkAccounts,
-                help_text='''每次启动游戏的时候是否使用引继账号登录（仅限日服）''',
+                help_text='每次启动游戏的时候是否使用引继账号登录（仅限日服）',
             )
 
         with Group('设备设置'):
             Segmented(
-                key='game.emulator',
-                label='模拟器类型',
-                ref=ref(CTX.conf.game.emulator),
+                key='device.lifecycleType',
+                label='设备类型',
+                ref=custom_ref(_get_lifecycle_type, _set_lifecycle_type),
                 options=lambda s: [
-                    o for o in s.meta.emulators
+                    o for o in s.meta.lifecycleTypes
                     if not (o['value'] in {'mumu', 'mumu_v5'} and platform.system() != 'Windows')
                 ],
-                on_change=_on_emulator_change,
             )
-            Checkbox(
-                key='game.checkEmulator',
-                label='检查并启动模拟器',
-                ref=ref(CTX.conf.game.check_emulator),
-            )
+            # MuMu 专属
             Custom(
-                key='game.mumuInstanceId',
+                key='device.mumuInstanceId',
                 label='多开实例',
                 kind='mumu_picker',
                 ref=custom_ref(_get_mumu_instance_id, _set_mumu_instance_id),
-                visible=_emulator_is('mumu', 'mumu_v5'),
+                visible=_lifecycle_is(MuMuDevice),
                 options=lambda s: s.meta.mumuInstances,
                 props={'refreshable': True},
             )
-            Text(
-                key='game.physicalAndroidSerial',
-                label='设备序列号',
-                ref=custom_ref(_get_physical_android_serial, _set_physical_android_serial),
-                visible=_emulator_is('physical_android'),
-                placeholder='留空自动选择第一个 USB 设备',
-            )
-            Text(
-                key='game.customAdbIp',
-                label='ADB IP',
-                ref=custom_ref(_get_custom_adb_ip, _set_custom_adb_ip),
-                visible=_custom_adb_connect_enabled,
-            )
-            Text(
-                key='game.customAdbPort',
-                label='ADB 端口',
-                ref=custom_ref(_get_custom_adb_port, _set_custom_adb_port),
-                visible=_custom_adb_connect_enabled,
-                validators=[_validate_port],
-            )
             Checkbox(
-                key='game.customRunAdbConnect',
-                label='执行 adb connect',
-                ref=custom_ref(_get_custom_run_adb_connect, _set_custom_run_adb_connect),
-                visible=_emulator_is('custom'),
-                help_text='如果模拟器需要通过「IP:端口」的形式连接，那么需要勾选，否则不需要。'
+                key='device.checkAndStart',
+                label='检查并启动',
+                ref=custom_ref(_get_check_and_start, _set_check_and_start),
+                visible=_lifecycle_is(MuMuDevice, CustomDevice),
             )
+            # 自定义专属
             Text(
-                key='game.customDeviceSerial',
-                label='设备序列号',
-                ref=custom_ref(_get_custom_device_serial, _set_custom_device_serial),
-                visible=_emulator_is('custom'),
-                placeholder='留空表示序列号同 `IP:端口`'
-            )
-            Text(
-                key='game.customStartCommand',
+                key='device.customStartCommand',
                 label='启动命令',
                 ref=custom_ref(_get_custom_start_command, _set_custom_start_command),
-                visible=_emulator_is('custom'),
+                visible=_lifecycle_is(CustomDevice),
                 validators=[_validate_start_command],
                 help_text='将会通过 shell 方式执行。因此编写时请注意转义等问题。<br>下面两个命令也是一样的。'
             )
             Checkbox(
-                key='game.customWaitStartCommand',
+                key='device.customWaitStartCommand',
                 label='等待启动命令退出后才继续',
                 ref=custom_ref(_get_custom_wait_start_command, _set_custom_wait_start_command),
-                visible=_emulator_is('custom'),
+                visible=_lifecycle_is(CustomDevice),
             )
             Text(
-                key='game.customStopCommand',
+                key='device.customStopCommand',
                 label='结束命令',
                 ref=custom_ref(_get_custom_stop_command, _set_custom_stop_command),
-                visible=_emulator_is('custom'),
+                visible=_lifecycle_is(CustomDevice),
                 placeholder='可选。如果为空，将会自动终止启动命令中的进程'
             )
             Text(
-                key='game.customRunningCommand',
+                key='device.customRunningCommand',
                 label='运行检测命令',
                 ref=custom_ref(_get_custom_running_command, _set_custom_running_command),
-                visible=_emulator_is('custom'),
+                visible=_lifecycle_is(CustomDevice),
                 placeholder='可选。如果为空，将会使用默认的运行检测方式'
             )
 
-        with Group('连接与控制设置'):
+        with Group('连接设置'):
             Segmented(
-                key='game.controlImpl',
-                label='控制方式',
-                ref=ref(CTX.conf.game.control_impl),
-                options=lambda s: [
-                    o for o in s.meta.controlImpls
-                    if not (o['value'] == 'nemu_ipc' and s.conf.game.emulator not in {'mumu', 'mumu_v5'})
-                ],
-                help_text='''对于 MuMu 模拟器，推荐使用 <b>Nemu IPC</b> 方式，对于其他模拟器与物理机，推荐使用 <b>scrcpy</b> 方式''',
+                key='device.connectionType',
+                label='连接方式',
+                ref=custom_ref(_get_connection_type, _set_connection_type),
+                visible=_show_connection_section,
+                options=lambda s: s.meta.connectionTypes,
+            )
+            # USB 字段
+            Text(
+                key='device.usbSerial',
+                label='设备序列号',
+                ref=custom_ref(_get_usb_serial, _set_usb_serial),
+                visible=_show_usb_serial,
+                placeholder='留空自动选择第一个 USB 设备',
+            )
+            # TCP 字段
+            Text(
+                key='device.tcpIp',
+                label='ADB IP',
+                ref=custom_ref(_get_tcp_ip, _set_tcp_ip),
+                visible=_show_tcp_fields,
+            )
+            Text(
+                key='device.tcpPort',
+                label='ADB 端口',
+                ref=custom_ref(_get_tcp_port, _set_tcp_port),
+                visible=_show_tcp_fields,
+                validators=[_validate_tcp_port],
             )
             Checkbox(
-                key='game.scrcpyVirtualDisplay',
+                key='device.tcpRunAdbConnect',
+                label='执行 adb connect',
+                ref=custom_ref(_get_tcp_run_adb_connect, _set_tcp_run_adb_connect),
+                visible=_show_tcp_fields,
+                help_text='如果需要通过「IP:端口」的形式连接设备，需要勾选。'
+            )
+            Text(
+                key='device.tcpDeviceSerial',
+                label='设备序列号',
+                ref=custom_ref(_get_tcp_device_serial, _set_tcp_device_serial),
+                visible=_show_tcp_fields,
+                placeholder='留空则默认使用 IP:端口 作为序列号'
+            )
+
+        with Group('控制方式'):
+            Segmented(
+                key='device.controlImpl',
+                label='控制方式',
+                ref=ref(CTX.conf.device.control_impl),
+                options=lambda s: [
+                    o for o in s.meta.controlImpls
+                    if not (o['value'] == 'nemu_ipc' and not isinstance(s.conf.device.lifecycle, MuMuDevice))
+                ],
+                help_text='对于 MuMu 模拟器，推荐使用 <b>Nemu IPC</b> 方式，对于其他模拟器与物理机，推荐使用 <b>scrcpy</b> 方式',
+            )
+            Checkbox(
+                key='device.scrcpyVirtualDisplay',
                 label='使用虚拟显示器',
-                ref=ref(CTX.conf.game.scrcpy_virtual_display),
-                visible=lambda s: s.conf.game.control_impl == 'scrcpy',
+                ref=ref(CTX.conf.device.scrcpy_virtual_display),
+                visible=lambda s: s.conf.device.control_impl == 'scrcpy',
             )
             Select(
-                key='game.resolutionMethod',
+                key='device.resolutionMethod',
                 label='分辨率设置',
-                ref=ref(CTX.conf.game.resolution_method),
+                ref=ref(CTX.conf.device.resolution_method),
                 options=lambda s: s.meta.resolutionMethods,
                 with_reset_button=True,
             )

@@ -5,7 +5,6 @@ from typing_extensions import assert_never
 
 
 LinkAccountOptions = Literal['no', 'google', 'google_play']
-EmulatorOptions = Literal['mumu', 'mumu_v5', 'custom', 'physical_android']
 
 
 class GameCharacter(str, Enum):

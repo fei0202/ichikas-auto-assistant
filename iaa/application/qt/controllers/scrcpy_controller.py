@@ -80,7 +80,7 @@ class ScrcpyController(QObject):
     def sync_visibility(self) -> None:
         scheduler = self._scheduler
         should_open = (
-            self._config_service.conf.game.control_impl == 'scrcpy'
+            self._config_service.conf.device.control_impl == 'scrcpy'
             and scheduler.device is not None
             and (scheduler.running or scheduler.is_starting or scheduler.is_stopping)
         )

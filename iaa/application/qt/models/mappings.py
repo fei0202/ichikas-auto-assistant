@@ -4,18 +4,21 @@ from typing import Literal
 
 from iaa.definitions.enums import (
     ChallengeLiveAward,
-    EmulatorOptions,
     GameCharacter,
     LinkAccountOptions,
 )
 
-EMULATOR_DISPLAY_MAP: dict[EmulatorOptions, str] = {
-    'mumu': 'MuMu',
-    'mumu_v5': 'MuMu v5.x',
-    'custom': '自定义',
-    'physical_android': '物理设备(USB)',
+LIFECYCLE_TYPE_DISPLAY_MAP: dict[str, str] = {
+    'mumu_v5': 'MuMu 12 (v5)',
+    'mumu': 'MuMu 12 (v4)',
+    'custom': '自定义模拟器',
+    'none': '物理机 / 手动管理',
 }
-EMULATOR_VALUE_MAP: dict[str, EmulatorOptions] = {value: key for key, value in EMULATOR_DISPLAY_MAP.items()}
+
+CONNECTION_TYPE_DISPLAY_MAP: dict[str, str] = {
+    'usb': 'USB',
+    'tcp': 'TCP / 无线',
+}
 
 SERVER_DISPLAY_MAP: dict[Literal['jp', 'tw', 'cn'], str] = {
     'jp': '日服',

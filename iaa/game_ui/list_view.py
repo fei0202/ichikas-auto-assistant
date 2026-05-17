@@ -694,6 +694,7 @@ if __name__ == "__main__":
     from kotonebot.client.host.mumu12_host import MuMu12HostConfig
 
     from iaa.config.base import IaaConfig
+    from iaa.config.schemas import MuMuDevice, CustomDevice
 
     def format_rect(rect: Rect | None) -> tuple[int, int, int, int] | None:
         return None if rect is None else rect.xyxy
@@ -704,7 +705,7 @@ if __name__ == "__main__":
         raise RuntimeError("No MuMu v5 instance found.")
 
     host = hosts[0]
-    if not host.running() and config.game.check_emulator:
+    if not host.running() and isinstance(config.device.lifecycle, (MuMuDevice, CustomDevice)) and config.device.lifecycle.check_and_start:
         host.start()
         host.wait_available()
 

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from .schemas import (
     ChallengeLiveConfig,
     CmConfig,
+    DeviceConfig,
     DeveloperConfig,
     EventStoreConfig,
     GameConfig,
@@ -10,7 +11,7 @@ from .schemas import (
     SchedulerConfig,
 )
 
-CONFIG_VERSION_CODE = 2
+CONFIG_VERSION_CODE = 3
 
 class IaaBaseTaskConfig(BaseModel):
     enabled: bool = False
@@ -19,6 +20,7 @@ class IaaConfig(BaseModel):
     version: int = CONFIG_VERSION_CODE
     name: str
     description: str
+    device: DeviceConfig = DeviceConfig()
     game: GameConfig
     live: LiveConfig
     challenge_live: ChallengeLiveConfig = ChallengeLiveConfig()

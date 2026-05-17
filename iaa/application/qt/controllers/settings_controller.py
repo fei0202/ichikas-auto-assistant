@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtQml import QJSValue
 
-from iaa.config.schemas import MuMuEmulatorData
 from iaa.definitions.enums import ShopItem
 
 from iaa.application.framework.dsl import FormContext, FormMeta, RuntimeEngine, SnapshotState
@@ -14,7 +13,6 @@ from ..forms.settings_form import build_settings_form
 from ..models import (
     CONTROL_IMPL_DISPLAY_MAP,
     DEFAULT_MUMU_INSTANCE_LABEL,
-    EMULATOR_DISPLAY_MAP,
     LINK_DISPLAY_MAP,
     RESOLUTION_METHOD_DISPLAY_MAP,
     SERVER_DISPLAY_MAP,
@@ -104,9 +102,11 @@ class SettingsController(QObject):
         self.dirtyChanged.emit(self._state.dirty)
 
     def _build_meta(self) -> FormMeta:
+        from ..models import LIFECYCLE_TYPE_DISPLAY_MAP, CONNECTION_TYPE_DISPLAY_MAP
         return FormMeta(
             profiles=[{'value': name, 'label': name} for name in self._iaa.config.list()],
-            emulators=[{'value': key, 'label': label} for key, label in EMULATOR_DISPLAY_MAP.items()],
+            lifecycleTypes=[{'value': key, 'label': label} for key, label in LIFECYCLE_TYPE_DISPLAY_MAP.items()],
+            connectionTypes=[{'value': key, 'label': label} for key, label in CONNECTION_TYPE_DISPLAY_MAP.items()],
             servers=[{'value': key, 'label': label} for key, label in SERVER_DISPLAY_MAP.items()],
             linkAccounts=[{'value': key, 'label': label} for key, label in LINK_DISPLAY_MAP.items()],
             controlImpls=[{'value': key, 'label': label} for key, label in CONTROL_IMPL_DISPLAY_MAP.items()],
@@ -145,21 +145,22 @@ class SettingsController(QObject):
         self.dirtyChanged.emit(self._state.dirty)
 
     def _get_mumu_instance_id(self) -> str:
-        conf = self._state.context.conf
-        if conf.game.emulator in {'mumu', 'mumu_v5'} and isinstance(conf.game.emulator_data, MuMuEmulatorData):
-            return conf.game.emulator_data.instance_id or ''
+        from iaa.config.schemas import MuMuDevice
+        lc = self._state.context.conf.device.lifecycle
+        if isinstance(lc, MuMuDevice):
+            return lc.instance_id or ''
         return ''
 
     def _set_mumu_instance_id(self, selected_id: str) -> None:
-        conf = self._state.context.conf
-        if conf.game.emulator not in {'mumu', 'mumu_v5'}:
-            return
-        if not isinstance(conf.game.emulator_data, MuMuEmulatorData):
-            conf.game.emulator_data = MuMuEmulatorData()
-        conf.game.emulator_data.instance_id = selected_id or None
+        from iaa.config.schemas import MuMuDevice
+        lc = self._state.context.conf.device.lifecycle
+        if isinstance(lc, MuMuDevice):
+            lc.instance_id = selected_id or None
 
     def _refresh_mumu_runtime(self, preferred_id: str = '', show_notice: bool = True) -> None:
-        emulator = str(self._state.context.conf.game.emulator or '')
+        from iaa.config.schemas import MuMuDevice
+        lc = self._state.context.conf.device.lifecycle
+        emulator = lc.type if isinstance(lc, MuMuDevice) else ''
         payload = json.loads(self._build_mumu_instances_payload(emulator, preferred_id))
         self._state.context.meta.mumuInstances = payload.get(
             'items', [{'id': '', 'label': DEFAULT_MUMU_INSTANCE_LABEL}]
@@ -198,12 +199,14 @@ class SettingsController(QObject):
             instances = host_cls.list()
             saved_id = ''
             conf = self._state.context.conf
+            lc = conf.device.lifecycle
+            from iaa.config.schemas import MuMuDevice
             if (
-                conf.game.emulator == emulator
-                and isinstance(conf.game.emulator_data, MuMuEmulatorData)
-                and conf.game.emulator_data.instance_id
+                isinstance(lc, MuMuDevice)
+                and lc.type == emulator
+                and lc.instance_id
             ):
-                saved_id = conf.game.emulator_data.instance_id
+                saved_id = lc.instance_id
             items = [{'id': '', 'label': DEFAULT_MUMU_INSTANCE_LABEL}] + [
                 {'id': str(instance.id), 'label': f'[{instance.id}] {instance.name}'}
                 for instance in instances

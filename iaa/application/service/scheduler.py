@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable, Any
 
 from kotonebot.client.device import Device, Size
 from kotonebot.client.scaler import ProportionalScaler
-from iaa.config.schemas import CustomEmulatorData, MuMuEmulatorData, PhysicalAndroidData
+from iaa.config.schemas import MuMuDevice, CustomDevice, NoDevice, TcpConnection, UsbConnection
 from iaa.application.service.custom_emulator import CustomEmulatorInstance
 from iaa.definitions.consts import package_by_server
 from iaa.utils import asset_path
@@ -42,15 +42,15 @@ def _parse_wm_size_output(output: str) -> str | None:
 
 def _setup_resolution(
     device: 'Device',
-    emulator: str,
+    is_physical_device: bool,
     resolution_method: str,
     package_name: str
 ) -> str | None:
     """
     设置设备分辨率。
-    
+
     :param device: 设备实例
-    :param emulator: 模拟器类型 ('mumu', 'mumu_v5', 'custom', 'physical_android')
+    :param is_physical_device: 是否为物理设备（NoDevice lifecycle）
     :param resolution_method: 分辨率设置方式 ('auto', 'keep', 'wm_size')
     :param package_name: 游戏包名，用于 kill 游戏
     :return: 原始物理分辨率，用于恢复；如果不需修改则返回 None
@@ -58,9 +58,9 @@ def _setup_resolution(
     if resolution_method == 'keep':
         logger.debug('Resolution method is "keep", skip resolution setup.')
         return None
-    
+
     if resolution_method == 'auto':
-        if emulator != 'physical_android':
+        if not is_physical_device:
             logger.debug('Resolution method is "auto" but not physical device, skip resolution setup.')
             return None
     
@@ -390,27 +390,30 @@ class SchedulerService:
             需要和任务执行在同一个线程中调用。
         """
         from kotonebot.client.host import Mumu12Host, Mumu12V5Host
+        from kotonebot.client.host import AdbHostConfig
         from kotonebot.client.host.protocol import HostProtocol, Instance
-        impl = self.iaa.config.conf.game.control_impl
-        emulator = self.iaa.config.conf.game.emulator
-        check_emulator = bool(self.iaa.config.conf.game.check_emulator)
-        emulator_data = self.iaa.config.conf.game.emulator_data
+
+        device_conf = self.iaa.config.conf.device
+        lifecycle = device_conf.lifecycle
+        connection = device_conf.connection
+        impl = device_conf.control_impl
+        use_vd = device_conf.scrcpy_virtual_display
 
         def _maybe_start(instance: Instance) -> None:
-            if check_emulator and not instance.running():
-                logger.info('Emulator is not running, starting: %s', instance)
+            check = lifecycle.check_and_start if isinstance(lifecycle, (MuMuDevice, CustomDevice)) else False
+            if check and not instance.running():
+                logger.info('Device is not running, starting: %s', instance)
                 instance.start()
                 instance.wait_available()
 
-        def _resolve_mumu_instance(host_cls: type[HostProtocol], host_name: str) -> Instance:
+        def _resolve_mumu_instance(host_cls: type[HostProtocol], host_name: str, instance_id: str | None) -> Instance:
             def _check(id: str):
                 if host_cls is Mumu12V5Host and host_cls.check_app_keptlive(id):
                     raise RuntimeError(
-                        '检测到当前模拟器 MuMu 12 已开启“应用保活”功能。\n'
+                        '检测到当前模拟器 MuMu 12 已开启"应用保活"功能。\n'
                         '请前往 MuMu 模拟器设置 → 其他 → 后台挂机时保活运行 中关闭，然后重新尝试。'
-                    ) 
+                    )
 
-            instance_id = emulator_data.instance_id if isinstance(emulator_data, MuMuEmulatorData) else None
             if instance_id is not None:
                 instance = host_cls.query(id=instance_id)
                 if instance is None:
@@ -430,7 +433,7 @@ class SchedulerService:
             jar_path = asset_path('scrcpy.jar')
             if not os.path.isfile(jar_path):
                 raise FileNotFoundError(f'Scrcpy jar not found: {jar_path}')
-            
+
             virtual_display_config = None
             if use_virtual_display:
                 virtual_display_config = VirtualDisplayConfig(
@@ -441,7 +444,7 @@ class SchedulerService:
                     height=720,
                     system_decorations=False
                 )
-            
+
             return ScrcpyConfig(
                 timeout=timeout,
                 server_jar_path=jar_path,
@@ -449,121 +452,116 @@ class SchedulerService:
                 virtual_display=virtual_display_config,
             )
 
-        if emulator == 'mumu':
-            host = _resolve_mumu_instance(Mumu12Host, 'MuMu')
-            _maybe_start(host)
+        def _apply_impl(host) -> 'Device':
             if impl == 'nemu_ipc':
                 from kotonebot.client.host.mumu12_host import MuMu12HostConfig
-                device = host.create_device('nemu_ipc', MuMu12HostConfig())
+                return host.create_device('nemu_ipc', MuMu12HostConfig())
             elif impl == 'adb':
-                from kotonebot.client.host import AdbHostConfig
-                device = host.create_device('adb', AdbHostConfig())
+                return host.create_device('adb', AdbHostConfig())
             elif impl == 'scrcpy':
-                from kotonebot.client.host import AdbHostConfig
-                use_vd = self.iaa.config.conf.game.scrcpy_virtual_display
-                device = host.create_device('scrcpy', _build_scrcpy_config(AdbHostConfig().timeout, use_vd))
+                return host.create_device('scrcpy', _build_scrcpy_config(AdbHostConfig().timeout, use_vd))
             elif impl == 'uiautomator':
-                from kotonebot.client.host import AdbHostConfig
-                device = host.create_device('uiautomator2', AdbHostConfig())
+                return host.create_device('uiautomator2', AdbHostConfig())
             else:
                 raise ValueError(f"Unknown control implementation: {impl}")
-        elif emulator == 'mumu_v5':
-            host = _resolve_mumu_instance(Mumu12V5Host, 'MuMu v5')
+
+        # ── Step 1：按 lifecycle 类型解析 host ────────────────────────────────
+
+        if isinstance(lifecycle, MuMuDevice):
+            host_cls = Mumu12Host if lifecycle.type == 'mumu' else Mumu12V5Host
+            host_name = 'MuMu' if lifecycle.type == 'mumu' else 'MuMu v5'
+            host = _resolve_mumu_instance(host_cls, host_name, lifecycle.instance_id)
             _maybe_start(host)
             if impl == 'nemu_ipc':
-                from kotonebot.client.host.mumu12_host import MuMu12HostConfig
-                device = host.create_device('nemu_ipc', MuMu12HostConfig())
-            elif impl == 'adb':
-                from kotonebot.client.host import AdbHostConfig
-                device = host.create_device('adb', AdbHostConfig())
-            elif impl == 'scrcpy':
-                from kotonebot.client.host import AdbHostConfig
-                use_vd = self.iaa.config.conf.game.scrcpy_virtual_display
-                device = host.create_device('scrcpy', _build_scrcpy_config(AdbHostConfig().timeout, use_vd))
-            elif impl == 'uiautomator':
-                from kotonebot.client.host import AdbHostConfig
-                device = host.create_device('uiautomator2', AdbHostConfig())
+                pass  # nemu_ipc 支持 MuMu
+            elif impl in ('adb', 'scrcpy', 'uiautomator'):
+                pass
             else:
                 raise ValueError(f"Unknown control implementation: {impl}")
-        elif emulator == 'custom':
-            from kotonebot.client.host import AdbHostConfig
-            data = emulator_data if isinstance(emulator_data, CustomEmulatorData) else None
-            if data is None:
-                raise RuntimeError('Custom emulator data is required when emulator is set to custom.')
-            adb_ip = data.adb_ip
-            adb_port = data.adb_port
-            device_serial = (data.device_serial or '').strip() or None
-            run_adb_connect = bool(data.run_adb_connect)
-            wait_start_command = bool(data.wait_start_command)
-            start_command = (data.start_command or '').strip()
-            stop_command = (data.stop_command or '').strip()
-            running_command = (data.running_command or '').strip()
+            return _apply_impl(host)
+
+        elif isinstance(lifecycle, CustomDevice):
+            start_command = (lifecycle.start_command or '').strip()
             if not start_command:
-                raise ValueError('Custom emulator start_command is required.')
-            if run_adb_connect:
-                if adb_port is None:
-                    raise ValueError('Custom emulator adb port is required when adb connect is enabled.')
-            else:
+                raise ValueError('自定义设备的启动命令不能为空。')
+
+            if isinstance(connection, TcpConnection):
+                if connection.run_adb_connect and connection.port is None:
+                    raise ValueError('TCP 连接已启用 adb connect，但未填写端口。')
+                adb_ip = connection.ip
+                adb_port = connection.port if connection.run_adb_connect else None
+                device_serial = (connection.device_serial or '').strip() or None
+                run_adb_connect = connection.run_adb_connect
+            elif isinstance(connection, UsbConnection):
+                adb_ip = '127.0.0.1'
                 adb_port = None
+                device_serial = (connection.device_serial or '').strip() or None
+                run_adb_connect = False
                 if not device_serial:
-                    raise ValueError('Custom emulator device_serial is required when adb connect is disabled.')
+                    raise ValueError('USB 连接模式下，自定义设备需要填写设备序列号。')
+            else:
+                raise ValueError('自定义设备不支持自动连接（auto）模式，请选择 USB 或 TCP。')
+
             custom_instance = CustomEmulatorInstance(
                 adb_ip=adb_ip,
                 adb_port=adb_port,
                 device_serial=device_serial,
                 run_adb_connect=run_adb_connect,
-                wait_start_command=wait_start_command,
+                wait_start_command=lifecycle.wait_start_command,
                 start_command=start_command,
-                stop_command=stop_command,
-                running_command=running_command,
+                stop_command=(lifecycle.stop_command or '').strip(),
+                running_command=(lifecycle.running_command or '').strip(),
             )
             self._custom_emulator_instance = custom_instance
             _maybe_start(custom_instance)
-            if impl == 'adb':
-                device = custom_instance.create_device('adb', AdbHostConfig())
-            elif impl == 'scrcpy':
-                use_vd = self.iaa.config.conf.game.scrcpy_virtual_display
-                device = custom_instance.create_device('scrcpy', _build_scrcpy_config(AdbHostConfig().timeout, use_vd))
-            elif impl == 'uiautomator':
-                device = custom_instance.create_device('uiautomator2', AdbHostConfig())
-            elif impl == 'nemu_ipc':
-                raise ValueError("'nemu_ipc' 实现仅支持 MuMu12，不支持 custom 模拟器。")
-            else:
-                raise ValueError(f"Unknown control implementation: {impl}")
-        elif emulator == 'physical_android':
+            if impl == 'nemu_ipc':
+                raise ValueError("'nemu_ipc' 仅支持 MuMu，不支持自定义设备。")
+            return _apply_impl(custom_instance)
+
+        elif isinstance(lifecycle, NoDevice):
             from kotonebot.client.host import PhysicalAndroidHost
-            from kotonebot.client.host import AdbHostConfig
-            data = self.iaa.config.conf.game.emulator_data
-            if not isinstance(data, PhysicalAndroidData):
-                raise ValueError('physical_android 模式下 emulator_data 必须是 PhysicalAndroidData。')
-            adb_serial = (data.device_serial or '').strip()
-            if not adb_serial:
-                devices = PhysicalAndroidHost.list()
-                if not devices:
-                    raise ValueError('未找到任何 USB 设备。请连接设备后重试。')
-                usb_host = devices[0]
-                logger.info('自动选择 USB 设备: %s', usb_host.id)
+
+            if isinstance(connection, UsbConnection):
+                adb_serial = (connection.device_serial or '').strip()
+                if not adb_serial:
+                    devices = PhysicalAndroidHost.list()
+                    if not devices:
+                        raise ValueError('未找到任何 USB 设备，请连接设备后重试。')
+                    host = devices[0]
+                    logger.info('自动选择 USB 设备: %s', host.id)
+                else:
+                    host = PhysicalAndroidHost.query(id=adb_serial)
+                    if host is None:
+                        raise ValueError(f'找不到 ADB USB 设备: {adb_serial}')
+                if not host.running():
+                    raise ValueError(f'ADB USB 设备不可用: {host.id}')
+                if impl == 'nemu_ipc':
+                    raise ValueError("'nemu_ipc' 仅支持 MuMu，不支持物理设备。")
+                return _apply_impl(host)
+
+            elif isinstance(connection, TcpConnection):
+                from iaa.application.service.custom_emulator import CustomEmulatorInstance
+                if connection.port is None:
+                    raise ValueError('TCP 连接需要填写端口。')
+                tcp_instance = CustomEmulatorInstance(
+                    adb_ip=connection.ip,
+                    adb_port=connection.port,
+                    device_serial=(connection.device_serial or '').strip() or None,
+                    run_adb_connect=connection.run_adb_connect,
+                    wait_start_command=False,
+                    start_command='',
+                    stop_command='',
+                    running_command='',
+                )
+                if impl == 'nemu_ipc':
+                    raise ValueError("'nemu_ipc' 仅支持 MuMu，不支持物理设备。")
+                return _apply_impl(tcp_instance)
+
             else:
-                usb_host = PhysicalAndroidHost.query(id=adb_serial)
-                if usb_host is None:
-                    raise ValueError(f'找不到 ADB USB 设备: {adb_serial}')
-            if not usb_host.running():
-                raise ValueError(f'ADB USB 设备不可用: {adb_serial}')
-            if impl == 'adb':
-                device = usb_host.create_device('adb', AdbHostConfig())
-            elif impl == 'scrcpy':
-                use_vd = self.iaa.config.conf.game.scrcpy_virtual_display
-                device = usb_host.create_device('scrcpy', _build_scrcpy_config(AdbHostConfig().timeout, use_vd))
-            elif impl == 'uiautomator':
-                device = usb_host.create_device('uiautomator2', AdbHostConfig())
-            elif impl == 'nemu_ipc':
-                raise ValueError("'nemu_ipc' 实现仅支持 MuMu12，不支持 physical_android。")
-            else:
-                raise ValueError(f"Unknown control implementation: {impl}")
+                raise ValueError('设备类型为"无"时，连接方式不能为自动，请选择 USB 或 TCP。')
+
         else:
-            raise ValueError(f"Unknown emulator: {emulator}")
-        
-        return device
+            raise ValueError(f"Unknown lifecycle type: {type(lifecycle)}")
 
     def connect_device(self, on_success: Callable[[], None] | None = None, on_error: Callable[[Exception], None] | None = None) -> None:
         """
@@ -633,15 +631,15 @@ class SchedulerService:
         """
         # 因为导入 kotonebot 开销较大，这里延迟导入
         from kotonebot.backend.context.context import init_context
-        emulator = self.iaa.config.conf.game.emulator
-        
+
         device = self.__create_device()
         device.orientation = 'landscape'
-        
+
         # 设置分辨率
-        resolution_method = self.iaa.config.conf.game.resolution_method
+        device_conf = self.iaa.config.conf.device
+        is_physical = isinstance(device_conf.lifecycle, NoDevice)
         package_name = package_by_server(self.iaa.config.conf.game.server)
-        self._original_resolution = _setup_resolution(device, emulator, resolution_method, package_name)
+        self._original_resolution = _setup_resolution(device, is_physical, device_conf.resolution_method, package_name)
         
         init_context(target_device=device, force=True)
         self.device = device

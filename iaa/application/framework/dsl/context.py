@@ -16,7 +16,8 @@ class FormMeta(BaseModel):
     """
 
     profiles: list[dict[str, Any]] = Field(default_factory=list)
-    emulators: list[dict[str, Any]] = Field(default_factory=list)
+    lifecycleTypes: list[dict[str, Any]] = Field(default_factory=list)
+    connectionTypes: list[dict[str, Any]] = Field(default_factory=list)
     servers: list[dict[str, Any]] = Field(default_factory=list)
     linkAccounts: list[dict[str, Any]] = Field(default_factory=list)
     controlImpls: list[dict[str, Any]] = Field(default_factory=list)
