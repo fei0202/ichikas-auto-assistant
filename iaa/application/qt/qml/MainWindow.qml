@@ -9,7 +9,7 @@ import "components"
 
 ApplicationWindow {
     id: window
-    width: 980
+    width: 1100
     height: 680
     visible: true
     title: window.appCtrl ? window.appCtrl.windowTitle : ""

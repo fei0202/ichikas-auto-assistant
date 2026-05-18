@@ -128,7 +128,7 @@ PageContainer {
                             padding: 10
                             RowLayout {
                                 anchors.fill: parent
-                                CheckBox {
+                                Switch {
                                     visible: !!modelData.checkable
                                     checked: !!modelData.enabled
                                     enabled: !runController.running && !runController.isStarting && !runController.isStopping
