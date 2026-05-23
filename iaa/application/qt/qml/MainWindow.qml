@@ -34,14 +34,61 @@ ApplicationWindow {
         noticePopup.open()
     }
 
+    function requestTelemetryConsent() {
+        App.Modal.message({
+            title: "数据收集",
+            content: "是否允许 iaa 自动发送匿名错误报告？发送的信息仅用于改善 iaa。",
+            buttons: [
+                { text: "拒绝", value: "deny" },
+                { text: "允许", value: "allow", highlighted: true }
+            ],
+            width: 420,
+            closePolicy: Popup.NoAutoClose
+        }, function(result) {
+            if (!window.appCtrl) {
+                return
+            }
+            if (result === "allow") {
+                window.appCtrl.setTelemetryConsent(true)
+            }
+            if (result === "deny") {
+                window.appCtrl.setTelemetryConsent(false)
+            }
+        })
+    }
+
+    function showMigrationMessage(text) {
+        App.Modal.message({
+            title: "配置升级",
+            content: text,
+            textFormat: Text.RichText,
+            buttons: [
+                { text: "确定", value: "ok", highlighted: true }
+            ],
+            width: 520
+        })
+    }
+
     function requestAppClose() {
         var closeRunner = function() {
             window.allowImmediateClose = true
             window.close()
         }
         if (window.runCtrl && window.runCtrl.running) {
-            quitDialog.pendingCloseAction = closeRunner
-            quitDialog.open()
+            App.Modal.message({
+                title: "确认退出",
+                content: "当前仍在执行任务，确定要退出吗？退出将先停止任务。",
+                buttons: [
+                    { text: "取消", value: "cancel" },
+                    { text: "退出", value: "ok", highlighted: true }
+                ],
+                width: 420,
+                closePolicy: Popup.NoAutoClose
+            }, function(result) {
+                if (result === "ok") {
+                    navigation.requestGuardedAction("关闭窗口", closeRunner)
+                }
+            })
             return
         }
         navigation.requestGuardedAction("关闭窗口", closeRunner)
@@ -128,6 +175,10 @@ ApplicationWindow {
         settingsCtrl: window.settingsCtrl
     }
 
+    ModalHost {
+        id: modalHost
+    }
+
     // ScrcpyWindow {}
 
     Popup {
@@ -157,101 +208,6 @@ ApplicationWindow {
         onTriggered: noticePopup.close()
     }
 
-    Dialog {
-        id: telemetryDialog
-        modal: true
-        title: "数据收集"
-        standardButtons: Dialog.NoButton
-        closePolicy: Popup.NoAutoClose
-        anchors.centerIn: Overlay.overlay
-        width: 420
-
-        contentItem: ColumnLayout {
-            spacing: 12
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: "是否允许 iaa 自动发送匿名错误报告？发送的信息仅用于改善 iaa。"
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                Button {
-                        text: "拒绝"
-                    onClicked: {
-                        window.appCtrl.setTelemetryConsent(false)
-                        telemetryDialog.close()
-                    }
-                }
-                Button {
-                    text: "允许"
-                    highlighted: true
-                    onClicked: {
-                        window.appCtrl.setTelemetryConsent(true)
-                        telemetryDialog.close()
-                    }
-                }
-            }
-        }
-    }
-
-    Dialog {
-        id: migrationDialog
-        modal: true
-        title: "配置升级"
-        standardButtons: Dialog.Ok
-        width: 520
-        anchors.centerIn: Overlay.overlay
-        property string migrationText: ""
-        contentItem: ColumnLayout {
-            spacing: 12
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                textFormat: Text.RichText
-                text: migrationDialog.migrationText
-            }
-        }
-    }
-
-    Dialog {
-        id: quitDialog
-        modal: true
-        title: "确认退出"
-        standardButtons: Dialog.NoButton
-        width: 420
-        anchors.centerIn: Overlay.overlay
-        property var pendingCloseAction: null
-        background: null
-        contentItem: ColumnLayout {
-            spacing: 12
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: "当前仍在执行任务，确定要退出吗？退出将先停止任务。"
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                Button {
-                    text: "取消"
-                    onClicked: {
-                        quitDialog.pendingCloseAction = null
-                        quitDialog.close()
-                    }
-                }
-                Button {
-                    text: "退出"
-                    highlighted: true
-                    onClicked: {
-                        quitDialog.close()
-                        if (quitDialog.pendingCloseAction) {
-                            navigation.requestGuardedAction("关闭窗口", quitDialog.pendingCloseAction)
-                            quitDialog.pendingCloseAction = null
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     Dialog {
         id: unsavedChangesDialog
@@ -306,7 +262,7 @@ ApplicationWindow {
         }
         function onTelemetryConsentRequiredChanged() {
             if (window.appCtrl && window.appCtrl.telemetryConsentRequired) {
-                telemetryDialog.open()
+                window.requestTelemetryConsent()
             }
         }
     }
@@ -320,13 +276,12 @@ ApplicationWindow {
 
     Component.onCompleted: {
         if (window.appCtrl && window.appCtrl.telemetryConsentRequired) {
-            telemetryDialog.open()
+            window.requestTelemetryConsent()
         }
         if (window.appCtrl) {
             var migrationMsg = window.appCtrl.checkMigrationMessages()
             if (migrationMsg) {
-                migrationDialog.migrationText = migrationMsg
-                migrationDialog.open()
+                window.showMigrationMessage(migrationMsg)
             }
         }
     }
