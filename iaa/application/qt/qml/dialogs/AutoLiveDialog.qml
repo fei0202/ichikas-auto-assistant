@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ".." as App
 
 Dialog {
     id: root
@@ -9,7 +10,6 @@ Dialog {
     width: 620
     anchors.centerIn: Overlay.overlay
     property var presets: []
-    signal showNotice(string kind, string text)
 
     function defaultPayload() {
         return {
@@ -64,7 +64,7 @@ Dialog {
                 onClicked: {
                     var raw = runController.lastAutoPresetJson()
                     if (!raw) {
-                        root.showNotice("error", "没有找到上次设定")
+                        App.Notice.show("error", "没有找到上次设定")
                         return
                     }
                     root.applyPreset(JSON.parse(raw))
@@ -170,7 +170,7 @@ Dialog {
                         runController.runAutoLive(JSON.stringify(root.formData))
                         root.close()
                     } catch (error) {
-                        root.showNotice("error", String(error))
+                        App.Notice.show("error", String(error))
                     }
                 }
             }

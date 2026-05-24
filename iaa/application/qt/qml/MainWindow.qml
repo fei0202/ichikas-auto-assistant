@@ -24,15 +24,7 @@ ApplicationWindow {
     readonly property var settingsCtrl: settingsController
     readonly property var prefsCtrl: preferencesController
     readonly property var logBridgeObj: logBridge
-    property string noticeKind: "info"
-    property string noticeText: ""
     property bool allowImmediateClose: false
-
-    function showNotice(kind, text) {
-        window.noticeKind = kind
-        window.noticeText = text
-        noticePopup.open()
-    }
 
     function requestTelemetryConsent() {
         App.Modal.message({
@@ -138,19 +130,16 @@ ApplicationWindow {
             ControlPage {
                 id: controlPage
                 autoLiveDialog: autoLiveDialogView
-                onShowNotice: function(kind, text) { window.showNotice(kind, text) }
             }
 
             SettingsPage {
                 id: settingsPage
                 formController: window.settingsCtrl
-                onShowNotice: function(kind, text) { window.showNotice(kind, text) }
             }
 
             PreferencesPage {
                 id: preferencesPage
                 prefsController: window.prefsCtrl
-                onShowNotice: function(kind, text) { window.showNotice(kind, text) }
             }
 
             LogPage {
@@ -166,7 +155,6 @@ ApplicationWindow {
 
     AutoLiveDialog {
         id: autoLiveDialogView
-        onShowNotice: function(kind, text) { window.showNotice(kind, text) }
     }
 
     ConfigManagerDialog {
@@ -179,34 +167,11 @@ ApplicationWindow {
         id: modalHost
     }
 
+    NoticeHost {
+        id: noticeHost
+    }
+
     // ScrcpyWindow {}
-
-    Popup {
-        id: noticePopup
-        x: parent.width - width - 24
-        y: 24
-        width: 360
-        height: implicitHeight
-        padding: 14
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle {
-            radius: 8
-            color: window.noticeKind === "error" ? "#7f1d1d" : "#14532d"
-        }
-        contentItem: Label {
-            width: parent.width
-            wrapMode: Text.Wrap
-            color: "white"
-            text: window.noticeText
-        }
-        onOpened: closeTimer.restart()
-    }
-
-    Timer {
-        id: closeTimer
-        interval: 4000
-        onTriggered: noticePopup.close()
-    }
 
 
     Dialog {
@@ -258,7 +223,7 @@ ApplicationWindow {
     Connections {
         target: window.appCtrl
         function onNotificationRaised(kind, text) {
-            window.showNotice(kind, text)
+            App.Notice.show(kind, text)
         }
         function onTelemetryConsentRequiredChanged() {
             if (window.appCtrl && window.appCtrl.telemetryConsentRequired) {
@@ -270,7 +235,7 @@ ApplicationWindow {
     Connections {
         target: window.runCtrl
         function onScriptAutoWarningRequested(text) {
-            window.showNotice("error", text)
+            App.Notice.show("error", text)
         }
     }
 

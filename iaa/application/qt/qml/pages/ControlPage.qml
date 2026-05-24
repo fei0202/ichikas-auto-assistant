@@ -8,7 +8,6 @@ PageContainer {
     title: "控制"
     property var tasks: []
     property var autoLiveDialog
-    signal showNotice(string kind, string text)
 
     function reloadTasks() {
         tasks = JSON.parse(runController.tasksStateJson())

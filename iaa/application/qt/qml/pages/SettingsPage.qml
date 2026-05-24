@@ -61,8 +61,6 @@ PageContainer {
     property bool dirty: false
     property bool runtimeReady: false
 
-    signal showNotice(string kind, string text)
-
     function loadRuntime() {
         var payload = JSON.parse(root.formController.getRuntime())
         if (!payload || typeof payload !== "object") {
@@ -100,13 +98,6 @@ PageContainer {
             root.dirty = !!value
         }
 
-        function onOperationSucceeded(text) {
-            root.showNotice("success", text)
-        }
-
-        function onOperationFailed(text) {
-            root.showNotice("error", text)
-        }
 
         function onConfigSwitched() {
             root.loadRuntime()
