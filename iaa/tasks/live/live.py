@@ -525,16 +525,18 @@ def solo_live(plan: OncePlan | SingleLoopPlan | ListLoopPlan):
             total = (int(max_count) if max_count != float('inf') else None)
             reporter.message('开始单曲循环（脚本自动）')
             with reporter.phase('单曲循环', total=total) as phase:
+                first_run = True
                 while True:
                     if not _start_single_live_run(
                         'script',
                         auto_set_unit=auto_set_unit,
-                        ap_multiplier=plan.ap_multiplier,
+                        ap_multiplier=plan.ap_multiplier if first_run else None,
                         song_select_mode=plan.song_select_mode,
                         song_name=plan.song_name,
                         debug_enabled=plan.debug_enabled,
                     ):
                         break
+                    first_run = False
                     count += 1
                     phase.step(f'已完成 {count} 次单曲循环')
                     if count >= max_count:
@@ -548,6 +550,7 @@ def solo_live(plan: OncePlan | SingleLoopPlan | ListLoopPlan):
         total = (int(max_count) if max_count != float('inf') else None)
         reporter.message('开始列表循环')
         with reporter.phase('列表循环', total=total) as phase:
+            first_run = True
             for _ in Loop():
                 _prepare_solo_live(plan.loop_song_mode, None)
                 start_auto_live(
@@ -555,8 +558,9 @@ def solo_live(plan: OncePlan | SingleLoopPlan | ListLoopPlan):
                     return_to='home',
                     debug_enabled=plan.debug_enabled,
                     auto_set_unit=auto_set_unit,
-                    ap_multiplier=plan.ap_multiplier,
+                    ap_multiplier=plan.ap_multiplier if first_run else None,
                 )
+                first_run = False
                 count += 1
                 logger.info(f'Song looped. {count}/{max_count}')
                 phase.step(f'已完成 {count} 次列表循环')
