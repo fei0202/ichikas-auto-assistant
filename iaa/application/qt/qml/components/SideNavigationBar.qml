@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import ".." as App
+import "../../../framework/dsl/qml/controls"
 
 // import Iaa.Controllers 1.0
 
@@ -102,7 +103,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
 
-            ComboBox {
+            Select {
                 Layout.fillWidth: true
                 model: root.configNames
                 textRole: "label"

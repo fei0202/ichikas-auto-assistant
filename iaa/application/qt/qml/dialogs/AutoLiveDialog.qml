@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import ".." as App
+import "../../../framework/dsl/qml/controls"
 
 Dialog {
     id: root
@@ -127,7 +128,7 @@ Dialog {
 
         RowLayout {
             Label { text: "AP 倍率" }
-            ComboBox {
+            Select {
                 model: ["保持现状", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
                 enabled: formData.playMode !== "script_auto"
                 currentIndex: model.indexOf(formData.apMultiplier)

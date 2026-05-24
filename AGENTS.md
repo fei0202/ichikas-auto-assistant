@@ -15,6 +15,17 @@ Use them deliberately. They solve different parts of the problem.
 - Do not over-split functions. If a helper is called only once, keep the logic inline unless the extracted function is genuinely complex or materially improves readability.
 - When adding reusable image templates, prefer the standard `resources/ -> tools/make_resources.py -> iaa.tasks.R` flow over ad-hoc file loading.
 
+### QML: ComboBox vs Select
+
+Use `Select` (`iaa/application/framework/dsl/qml/controls/Select.qml`) instead of `ComboBox` for all non-editable dropdowns. `Select` is a FluentWinUI3 ComboBox in select mode with corrected item highlight behavior: the accent bar only appears on the currently selected item; hovering other items changes their background color without showing an accent bar.
+
+- **Non-editable dropdown** → use `Select`
+- **Editable ComboBox** (`editable: true`) → keep using `ComboBox`
+
+Import path examples (adjust `..` depth to match the file's location):
+- Same directory as `Select.qml`: no import needed
+- From `iaa/application/qt/qml/**/`: `import "../../../framework/dsl/qml/controls"`
+
 ## `kotonebot-emulator-debug`
 
 Use this skill when the task is about live interaction with the emulator or reproducing behavior on a real page.

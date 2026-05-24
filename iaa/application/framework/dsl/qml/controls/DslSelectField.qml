@@ -57,7 +57,7 @@ ColumnLayout {
         helpText: root.field.helpText || ""
         errorText: root.field.error || ""
         RowLayout {
-            ComboBox {
+            Select {
                 id: combo
                 Layout.fillWidth: true
                 enabled: !!root.field.enabled
@@ -73,21 +73,6 @@ ColumnLayout {
                     }
                     let selected = options[index]
                     root.formController.setValue(root.field.id, root.itemValue(selected))
-                }
-
-                contentItem: Text {
-                    leftPadding: 6
-                    rightPadding: combo.indicator.width + combo.spacing
-                    text: {
-                        if (!combo.model || combo.currentIndex < 0 || combo.currentIndex >= combo.model.length) {
-                            return ""
-                        }
-                        return root.itemLabel(combo.model[combo.currentIndex])
-                    }
-                    font: combo.font
-                    color: combo.enabled ? combo.palette.text : combo.palette.placeholderText
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideRight
                 }
             }
 

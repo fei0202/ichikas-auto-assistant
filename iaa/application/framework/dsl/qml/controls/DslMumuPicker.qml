@@ -34,7 +34,7 @@ ColumnLayout {
         errorText: root.field.error || ""
 
         RowLayout {
-            ComboBox {
+            Select {
                 Layout.fillWidth: true
                 enabled: !!root.field.enabled
                 model: root.field.options || []

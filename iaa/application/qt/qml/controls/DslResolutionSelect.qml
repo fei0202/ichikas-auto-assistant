@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 import "../../../framework/dsl/qml/components"
+import "../../../framework/dsl/qml/controls"
 
 ColumnLayout {
     // 由 FieldRenderer.customLoader 在 onLoaded 设初始值，onFieldChanged 同步后续更新
@@ -51,7 +52,7 @@ ColumnLayout {
         errorText: (field && field.error) ? field.error : ""
 
         RowLayout {
-            ComboBox {
+            Select {
                 id: combo
                 Layout.fillWidth: true
                 enabled: !!(field && field.enabled)
