@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class TelemetryConfig(BaseModel):
@@ -21,13 +21,30 @@ class CustomPushData(BaseModel):
     command: str = ''
 
 
-PushData = CustomPushData
+class DiscordPushData(BaseModel):
+    webhook_url: str = ''
+
+
+PushData = CustomPushData | DiscordPushData
 
 
 class PushConfig(BaseModel):
     enabled: bool = False
-    type: Literal['custom'] = 'custom'
-    data: CustomPushData = CustomPushData()
+    type: Literal['custom', 'discord'] = 'custom'
+    data: PushData = Field(default_factory=CustomPushData)
+
+    @model_validator(mode='before')
+    @classmethod
+    def _coerce_data(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            push_type = values.get('type', 'custom')
+            raw_data = values.get('data')
+            if isinstance(raw_data, dict):
+                if push_type == 'discord':
+                    values['data'] = DiscordPushData(**raw_data)
+                else:
+                    values['data'] = CustomPushData(**raw_data)
+        return values
 
 
 class NotifyConfig(BaseModel):

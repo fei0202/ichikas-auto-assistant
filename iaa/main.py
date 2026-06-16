@@ -23,6 +23,7 @@ class CliAction:
     debug_enabled: bool = False
     auto_live_kwargs: dict[str, object] | None = None
     help_text: str | None = None
+    mumu_instance: str | None = None
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -75,7 +76,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest='command')
 
-    subparsers.add_parser('run', help='Run configured regular tasks')
+    run_parser = subparsers.add_parser('run', help='Run configured regular tasks')
+    run_parser.add_argument(
+        '--mumu-instance',
+        default=None,
+        metavar='ID',
+        help='Override MuMu instance ID from config (e.g. --mumu-instance 1)',
+    )
 
     invoke_parser = subparsers.add_parser('invoke', help='Run one or more tasks explicitly')
     invoke_parser.add_argument('task_ids', nargs='+', help='Task id(s) to run in order')
@@ -139,6 +146,7 @@ def parse_cli_action(argv: Sequence[str] | None = None) -> CliAction:
             kind='run_regular',
             config_name=args.config,
             debug_enabled=bool(args.debug),
+            mumu_instance=args.mumu_instance,
         )
 
     if args.command == 'invoke':
@@ -214,6 +222,12 @@ def execute_cli_action(action: CliAction) -> int:
 
     validate_cli_config_selection(action)
     iaa = IaaService(config_name=action.config_name)
+
+    if action.mumu_instance is not None:
+        from iaa.config.schemas import MuMuDevice
+        lc = iaa.config.conf.device.lifecycle
+        if isinstance(lc, MuMuDevice):
+            lc.instance_id = action.mumu_instance or None
 
     if action.kind == 'invoke_tasks':
         for task_id in action.task_ids:
