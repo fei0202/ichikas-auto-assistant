@@ -107,7 +107,8 @@ def build_preferences_form() -> tuple[FormSpec[PreferencesContext], list[Callabl
             )
             Text(
                 key='notify.push.data.webhook_url',
-                label='Discord Webhook URL',
+                label='Webhook URL',
+                help_text='<a href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks">如何获取 Discord Webhook URL？</a>',
                 ref=_push_webhook_url_ref,
                 placeholder='https://discord.com/api/webhooks/...',
                 visible=lambda ctx: ctx.shared.notify.push.enabled and ctx.shared.notify.push.type == 'discord',
