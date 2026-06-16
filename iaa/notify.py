@@ -1,7 +1,7 @@
-import json
 import logging
 import subprocess
-import urllib.request
+
+import requests
 
 from iaa.config.shared import NotifyConfig
 
@@ -29,17 +29,10 @@ def _send_discord(webhook_url: str, title: str, message: str) -> None:
         logger.warning('Discord webhook URL is empty')
         return
     color = _infer_discord_color(title, message)
-    payload = json.dumps(
-        {'embeds': [{'title': title, 'description': message, 'color': color}]}
-    ).encode()
-    req = urllib.request.Request(
-        webhook_url,
-        data=payload,
-        headers={'Content-Type': 'application/json'},
-        method='POST',
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        logger.debug('Discord webhook response: %s', resp.status)
+    payload = {'embeds': [{'title': title, 'description': message, 'color': color}]}
+    resp = requests.post(webhook_url, json=payload, timeout=10)
+    resp.raise_for_status()
+    logger.debug('Discord webhook response: %s', resp.status_code)
 
 
 def send_notification(title: str, message: str, config: NotifyConfig) -> None:
@@ -75,3 +68,5 @@ def send_notification(title: str, message: str, config: NotifyConfig) -> None:
                 logger.debug('Discord notification sent: %s - %s', title, message)
             except Exception:
                 logger.exception('Failed to send Discord webhook notification')
+        else:
+            raise ValueError(f'Unknown push notification type: {config.push.type}')
