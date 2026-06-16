@@ -1,5 +1,6 @@
 import logging
 import subprocess
+from typing import Literal
 
 import requests
 
@@ -7,35 +8,27 @@ from iaa.config.shared import NotifyConfig
 
 logger = logging.getLogger(__name__)
 
-_DISCORD_COLOR_SUCCESS = 0x57F287  # green
-_DISCORD_COLOR_FAILURE = 0xED4245  # red
-_DISCORD_COLOR_DEFAULT = 0x5865F2  # blurple
+NotificationType = Literal['info', 'success', 'error']
 
-_FAILURE_KEYWORDS = ('失败', '错误', '失敗', '錯誤', 'fail', 'error', 'failed')
-_SUCCESS_KEYWORDS = ('完成', '成功', 'done', 'success', 'finished', 'complete')
-
-
-def _infer_discord_color(title: str, message: str) -> int:
-    text = (title + ' ' + message).lower()
-    if any(k in text for k in _FAILURE_KEYWORDS):
-        return _DISCORD_COLOR_FAILURE
-    if any(k in text for k in _SUCCESS_KEYWORDS):
-        return _DISCORD_COLOR_SUCCESS
-    return _DISCORD_COLOR_DEFAULT
+_DISCORD_COLORS: dict[NotificationType, int] = {
+    'success': 0x57F287,  # green
+    'error': 0xED4245,  # red
+    'info': 0x5865F2,  # blurple
+}
 
 
-def _send_discord(webhook_url: str, title: str, message: str) -> None:
+def _send_discord(webhook_url: str, title: str, message: str, type: NotificationType) -> None:
     if not webhook_url:
         logger.warning('Discord webhook URL is empty')
         return
-    color = _infer_discord_color(title, message)
+    color = _DISCORD_COLORS[type]
     payload = {'embeds': [{'title': title, 'description': message, 'color': color}]}
     resp = requests.post(webhook_url, json=payload, timeout=10)
     resp.raise_for_status()
     logger.debug('Discord webhook response: %s', resp.status_code)
 
 
-def send_notification(title: str, message: str, config: NotifyConfig) -> None:
+def send_notification(title: str, message: str, config: NotifyConfig, *, type: NotificationType = 'info') -> None:
     if config.system:
         try:
             from plyer import notification
@@ -64,7 +57,7 @@ def send_notification(title: str, message: str, config: NotifyConfig) -> None:
                 logger.warning('Discord push type set but data is not DiscordPushData')
                 return
             try:
-                _send_discord(data.webhook_url, title, message)
+                _send_discord(data.webhook_url, title, message, type)
                 logger.debug('Discord notification sent: %s - %s', title, message)
             except Exception:
                 logger.exception('Failed to send Discord webhook notification')
