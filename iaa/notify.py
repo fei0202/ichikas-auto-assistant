@@ -38,10 +38,10 @@ def send_notification(title: str, message: str, config: NotifyConfig, *, type: N
             logger.exception('Failed to send system notification')
 
     if config.push.enabled:
-        if config.push.type == 'custom':
-            from iaa.config.shared import CustomPushData
-            data = config.push.data
-            command = data.command if isinstance(data, CustomPushData) else ''
+        from iaa.config.shared import CustomPushData, DiscordPushData
+        data = config.push.data
+        if isinstance(data, CustomPushData):
+            command = data.command
             if not command:
                 logger.warning('Push notification enabled but command is empty')
                 return
@@ -50,16 +50,11 @@ def send_notification(title: str, message: str, config: NotifyConfig, *, type: N
                 logger.debug('Push notification command executed: %s', command)
             except Exception:
                 logger.exception('Failed to execute push notification command')
-        elif config.push.type == 'discord':
-            from iaa.config.shared import DiscordPushData
-            data = config.push.data
-            if not isinstance(data, DiscordPushData):
-                logger.warning('Discord push type set but data is not DiscordPushData')
-                return
+        elif isinstance(data, DiscordPushData):
             try:
                 _send_discord(data.webhook_url, title, message, type)
                 logger.debug('Discord notification sent: %s - %s', title, message)
             except Exception:
                 logger.exception('Failed to send Discord webhook notification')
         else:
-            raise ValueError(f'Unknown push notification type: {config.push.type}')
+            raise ValueError(f'Unknown push notification data type: {data.type}')

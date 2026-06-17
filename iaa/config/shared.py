@@ -1,6 +1,8 @@
-from typing import Any, Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
+
+VERSION = 2
 
 
 class TelemetryConfig(BaseModel):
@@ -18,33 +20,21 @@ class InterfaceConfig(BaseModel):
 
 
 class CustomPushData(BaseModel):
+    type: Literal['custom'] = 'custom'
     command: str = ''
 
 
 class DiscordPushData(BaseModel):
+    type: Literal['discord'] = 'discord'
     webhook_url: str = ''
 
 
-PushData = CustomPushData | DiscordPushData
+PushData = Annotated[CustomPushData | DiscordPushData, Field(discriminator='type')]
 
 
 class PushConfig(BaseModel):
     enabled: bool = False
-    type: Literal['custom', 'discord'] = 'custom'
     data: PushData = Field(default_factory=CustomPushData)
-
-    @model_validator(mode='before')
-    @classmethod
-    def _coerce_data(cls, values: Any) -> Any:
-        if isinstance(values, dict):
-            push_type = values.get('type', 'custom')
-            raw_data = values.get('data')
-            if isinstance(raw_data, dict):
-                if push_type == 'discord':
-                    values['data'] = DiscordPushData(**raw_data)
-                else:
-                    values['data'] = CustomPushData(**raw_data)
-        return values
 
 
 class NotifyConfig(BaseModel):
@@ -58,7 +48,7 @@ class HotkeysConfig(BaseModel):
 
 
 class SharedConfig(BaseModel):
-    version: int = 1
+    version: int = VERSION
     profiles: ProfilesConfig = ProfilesConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     interface: InterfaceConfig = InterfaceConfig()
